@@ -26,9 +26,11 @@ To ensure that you are eventually working with a clean BPMN state, it is recomme
 
 ## Building
 
-Build the tool with the following command to create an executable JAR:
+Build the tool with the following commands to create an executable JAR:
 
 ```bash
+  git clone https://github.com/hkupitz/inspire-bpmn-fixer.git
+  cd inspire-bpmn-fixer
   mvn package
 ```
 ## How to use
