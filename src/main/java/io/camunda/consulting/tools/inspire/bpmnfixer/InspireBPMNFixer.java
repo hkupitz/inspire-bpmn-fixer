@@ -37,7 +37,7 @@ class InspireBPMNFixer {
   static final Logger logger = LoggerFactory.getLogger(InspireBPMNFixer.class);
 
   private static final String OUTPUT_FOLDER_NAME = "fixed";
-  private static final String QNAME_PREFIX_CHAR = "A";
+  private static final String QNAME_PREFIX_CHAR = "_";
 
   private final String[] attributesToFix = {"attachedToRef", "bpmnElement", "default",
     "id", "sourceElement", "sourceRef", "targetElement", "targetRef"};
