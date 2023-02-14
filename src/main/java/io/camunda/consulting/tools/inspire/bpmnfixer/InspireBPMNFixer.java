@@ -48,9 +48,9 @@ class InspireBPMNFixer {
   private String outputPath;
 
   public static void main(String[] args) {
-    InspireBPMNFixer fixer = new InspireBPMNFixer();
-
     if (args.length == 1) {
+      InspireBPMNFixer fixer = new InspireBPMNFixer();
+
       fixer.validateQNamePrefix();
       fixer.compileFiles(args);
       fixer.fixFiles();
@@ -61,7 +61,7 @@ class InspireBPMNFixer {
   }
 
   private void validateQNamePrefix() {
-    if (!QNAME_PREFIX_CHAR.matches(":|_|[A-Z]|[a-z]")) {
+    if (!QNAME_PREFIX_CHAR.matches("[A-Z]|[a-z]|_|:")) {
       throw new UnsupportedOperationException("QName prefix character " + QNAME_PREFIX_CHAR
         + " is invalid. Allowed characters are [A-Z][a-z]_:");
     }
@@ -118,27 +118,34 @@ class InspireBPMNFixer {
 
   public void fixFiles() {
     for (File file : filesToFix) {
-      Document doc = parseFileAndGetDocument(file);
-      NodeList nodes = doc.getElementsByTagName("*");
+      Document document = parseFileAndGetDocument(file);
+      NodeList elements = document.getElementsByTagName("*");
 
-      for (int i = 0; i < nodes.getLength(); i++) {
-        Node node = nodes.item(i);
+      for (int i = 0; i < elements.getLength(); ++i) {
+        Node element = elements.item(i);
 
-        if (node.getNodeType() == Node.ELEMENT_NODE) {
-          String tag = node.getNodeName();
+        if (element.getNodeType() == Node.ELEMENT_NODE) {
+          String tag = element.getNodeName();
 
           if (tag.equalsIgnoreCase("bpmn2:conditionexpression")) {
-            convertExpressionTag(node, "inspire:Rule");
+            convertExpressionTag(element, "inspire:Rule");
           } else if (tag.equalsIgnoreCase("bpmn2:timeduration")) {
-            convertExpressionTag(node, "inspire:StringExpression");
+            convertExpressionTag(element, "inspire:StringExpression");
           } else {
-            fixDigitPrefixedQNameForTag(node);
-            fixDigitPrefixedQNamesForTagAttributes(node);
+
+            // For now we are only fixing qualified names in the text content of tags without any
+            // additional attributes. This might be subject to change if there are any unhandled
+            // BPMN edge cases.
+            if (element.getAttributes().getLength() == 0 && element.hasChildNodes()) {
+              fixDigitPrefixedQNameForTag(element);
+            } else {
+              fixDigitPrefixedQNamesForTagAttributes(element);
+            }
           }
         }
       }
 
-      writeFixedFile(file, doc);
+      writeFixedFile(file, document);
     }
 
     logger.info(
@@ -147,25 +154,25 @@ class InspireBPMNFixer {
   }
 
   private Document parseFileAndGetDocument(File file) {
-    Document doc = null;
+    Document document = null;
     try {
       logger.info("Parsing \"" + file.getName() + "\"");
-      doc = buildDocument(file);
-    } catch (ParserConfigurationException | IOException | SAXException e) {
+      document = buildDocument(file);
+    } catch (ParserConfigurationException | SAXException | IOException e) {
       logger.error("Error while parsing " + file.getName());
       System.exit(1);
     }
 
-    return doc;
+    return document;
   }
 
   private Document buildDocument(File file)
     throws ParserConfigurationException, SAXException, IOException {
     DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-    Document doc = builder.parse(file);
+    Document document = builder.parse(file);
 
-    doc.getDocumentElement().normalize();
-    return doc;
+    document.getDocumentElement().normalize();
+    return document;
   }
 
   /**
@@ -173,15 +180,16 @@ class InspireBPMNFixer {
    *
    * <p>Example for a BPM Inspire expression tag:
    * {@code <bpmn2:conditionExpression xsi:type="inspire:Rule" id="ID" expression="EXPRESSION"/>}
-   * <br /> Converted to Camunda Platform 7's format:
+   * <br />
+   * Converted to Camunda Platform 7's format:
    * {@code <bpmn2:conditionExpression
    * xsi:type="bpmn:tFormalExpression">EXPRESSION</bpmn2:conditionExpression>}</p>
    *
-   * @param node           The XML node representing the BPMN expression tag
+   * @param tagElement     The XML node representing the BPMN expression tag
    * @param inspireXsiType The BPM Inspire xsi:type to convert
    */
-  private void convertExpressionTag(Node node, String inspireXsiType) {
-    NamedNodeMap attributes = node.getAttributes();
+  private void convertExpressionTag(Node tagElement, String inspireXsiType) {
+    NamedNodeMap attributes = tagElement.getAttributes();
 
     Node expressionAttr = attributes.getNamedItem("expression");
     Node idAttr = attributes.getNamedItem("id");
@@ -189,12 +197,12 @@ class InspireBPMNFixer {
 
     if (expressionAttr != null && idAttr != null && xsiTypeAttr != null) {
       if (xsiTypeAttr.getTextContent().equalsIgnoreCase(inspireXsiType)) {
-        String expression = expressionAttr.getTextContent();
-
         attributes.removeNamedItem("expression");
         attributes.removeNamedItem("id");
         xsiTypeAttr.setNodeValue("bpmn:tFormalExpression");
-        node.setTextContent(expression);
+
+        String expression = expressionAttr.getTextContent();
+        tagElement.setTextContent(expression);
       }
     }
   }
@@ -202,26 +210,23 @@ class InspireBPMNFixer {
   /**
    * Checks and fixes a tag's qualified name starting with a digit.
    *
-   * <p>Example for an invalid qualified name: {@code <tag>0123456789</tag>}</p>
+   * <p>Example for an invalid qualified name: {@code <bpmn2:incoming>0123456789</bpmn2:incoming>}
+   * </p>
    *
    * <p>The found qualified name will be prefixed with the prefix specified in
    * <em>InspireBPMNFixer.QNAME_PREFIX</em>. All qualified names in a file receive the same prefix
    * to keep them consistent.</p>
    *
-   * @param node The XML node representing the tag which contains a potentially invalid qualified
-   *             name
+   * @param tagElement The XML node representing the tag which contains a potentially invalid
+   *                   qualified name
    */
-  private void fixDigitPrefixedQNameForTag(Node node) {
-    NamedNodeMap attributes = node.getAttributes();
+  private void fixDigitPrefixedQNameForTag(Node tagElement) {
+    String textContent = tagElement.getFirstChild().getTextContent()
+      .trim().replace("\\n", "").replace("\\r\\n", "");
 
-    if (attributes.getLength() == 0 && node.hasChildNodes()) {
-      String textContent = node.getFirstChild().getTextContent()
-        .trim().replace("\\n", "").replace("\\r\\n", "");
-
-      // Tag text content starts with a digit
-      if (!textContent.isEmpty() && textContent.matches("^[0-9].*$")) {
-        node.setTextContent(QNAME_PREFIX_CHAR + textContent);
-      }
+    // Tag text content starts with a digit
+    if (!textContent.isEmpty() && textContent.matches("^[0-9].*$")) {
+      tagElement.setTextContent(QNAME_PREFIX_CHAR + textContent);
     }
   }
 
@@ -234,14 +239,14 @@ class InspireBPMNFixer {
    * <em>InspireBPMNFixer.QNAME_PREFIX</em>. All qualified names in a file receive the same prefix
    * to keep them consistent.</p>
    *
-   * @param node The XML node representing the tag whose attributes contain potentially invalid
-   *             qualified names
+   * @param tagElement The XML node representing the tag whose attributes contain potentially
+   *                   invalid qualified names
    */
-  private void fixDigitPrefixedQNamesForTagAttributes(Node node) {
-    NamedNodeMap attributes = node.getAttributes();
+  private void fixDigitPrefixedQNamesForTagAttributes(Node tagElement) {
+    NamedNodeMap attributes = tagElement.getAttributes();
 
-    for (int j = 0; j < attributes.getLength(); ++j) {
-      Node attribute = attributes.item(j);
+    for (int i = 0; i < attributes.getLength(); ++i) {
+      Node attribute = attributes.item(i);
 
       String attributeName = attribute.getNodeName();
       List<String> attributeNamesToFix = Arrays.stream(attributesToFix)
@@ -254,7 +259,7 @@ class InspireBPMNFixer {
         if (attributeValue.matches("^[0-9].*$")) {
           attribute.setNodeValue(QNAME_PREFIX_CHAR + attributeValue);
 
-          // Attribute value is negative
+        // Attribute value is negative
         } else if (attributeValue.matches("^-.*")) {
           attribute.setNodeValue(QNAME_PREFIX_CHAR + attributeValue.substring(1));
         }
@@ -262,7 +267,7 @@ class InspireBPMNFixer {
     }
   }
 
-  private void writeFixedFile(File file, Document doc) {
+  private void writeFixedFile(File file, Document document) {
     logger.info("Writing fixed file to \"" + OUTPUT_FOLDER_NAME + "\\" + file.getName() + "\"");
 
     try {
@@ -270,11 +275,12 @@ class InspireBPMNFixer {
       if (!outputFolder.exists()) {
         if (!outputFolder.mkdir()) {
           logger.error("Error while creating output folder: " + outputPath);
+          System.exit(1);
         }
       }
 
       FileOutputStream out = new FileOutputStream(outputPath + file.getName());
-      transformDocument(doc, new BufferedOutputStream(out));
+      transformDocument(document, new BufferedOutputStream(out));
     } catch (IOException | TransformerException e) {
       logger.error("Error while writing fixed BPMN file: " + file.getName());
       System.exit(1);

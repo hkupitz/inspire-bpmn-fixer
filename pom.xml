@@ -6,7 +6,7 @@
 
   <groupId>io.camunda.consulting.tools.inspire.bpmnfixer</groupId>
   <artifactId>InspireBPMNFixer</artifactId>
-  <version>0.1</version>
+  <version>0.1.2</version>
 
   <properties>
     <maven.compiler.source>11</maven.compiler.source>
@@ -50,5 +50,4 @@
       </plugin>
     </plugins>
   </build>
-
 </project>
